@@ -1,0 +1,73 @@
+# GitHub Actions workflow
+# https://help.github.com/actions
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment"
+        type: environment
+        default: "test"
+        required: true
+
+env:
+  BUN_VERSION: latest
+  VERSION: ${{ github.event.pull_request.number }}
+  HUSKY: 0
+
+jobs:
+  build:
+    name: "Build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Configure Bun and install dependencies
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install
+
+      # Analyze code for potential problems
+      - run: bun prettier --check .
+        if: ${{ github.event_name == 'pull_request' }}
+      - run: bun lint
+        if: ${{ github.event_name == 'pull_request' }}
+      - run: bun tsc --build
+      - run: bun --filter app test
+        if: ${{ github.event_name == 'pull_request' }}
+      # - run: bun --filter edge test
+      #   if: ${{ github.event_name == 'pull_request' }}
+
+      # Compile and save build artifacts
+      - run: bun build
+      - uses: actions/upload-artifact@v4
+        with: { name: "build", path: "app/dist\nedge/dist\n" }
+
+  deploy:
+    name: "Deploy"
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment:
+      name: ${{ inputs.environment || 'test' }}
+      url: ${{ inputs.environment == 'prod' && 'https://example.com' || format('https://{0}.example.com', inputs.environment || 'test') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install
+      - uses: actions/download-artifact@v4
+        with: { name: "build" }
+      - run: bun wrangler deploy --env=${{ inputs.environment || 'test' }}
+        if: ${{ false }}
